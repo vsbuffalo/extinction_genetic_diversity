@@ -1,0 +1,155 @@
+function (void)assert(logical x, [string msg = "assertion failed"]) {
+  if (!x) stop(msg);
+}
+
+function (logical)contains(string x, string y) {
+  assert(length(x) == 1 & length(y) == 1, "x and y must be length 1");
+  return length(strsplit(x, y)) > 1;
+}
+
+function (string)filename_str(string params) {
+  out = "";
+  for (i in seqAlong(params)) {
+    v = params[i];
+    val = executeLambda(v + ";");
+    assert(!contains(asString(val), "..") & !contains(asString(val), "/"),
+           "filename key/value cannot contain . or /!");
+    out = out + v + val + "_";
+  }
+  return out;
+}
+
+function (object)param_dict(string params) {
+  pd = Dictionary();
+  for (i in seqAlong(params)) {
+    v = params[i];
+    val = executeLambda(v + ";");
+    if (length(val) > 1) {
+      val = paste(val, sep=",");
+    }
+    pd.setValue(v, val);
+  }
+  return pd;
+}
+
+initialize() {
+  initializeSLiMModelType("nonWF");
+  defineConstant("target_neut_sites", 5000);
+
+  if (exists("slimgui") | (exists("defaults"))) {
+    // default command line arguments; primarily for debugging.
+    defineConstant("rep", 0);
+    defineConstant("Vs", 1);
+    defineConstant("K", 500);
+    defineConstant("rbp", 1e-8);
+    defineConstant("alpha", 0.01);
+    defineConstant("muT", 1e-8);
+    defineConstant("fitfunc", "optimashift");
+    defineConstant("optimasd", 0.5*sqrt(Vs));
+  } 
+  defineConstant("datadir", '../data/slim_sims/polygenic_nonwf/');
+  defineConstant("seed", getSeed());
+  defineConstant("region_length", 100e6);
+  defineConstant("burnin", 10*K);
+  defineConstant("rungen", 5*K);
+  defineConstant("end", burnin + rungen);
+  defineConstant("shift_generation", burnin);
+  defineConstant("fitness_offset", 0.0);
+
+  initializeSLiMOptions(keepPedigrees=T);
+  initializeTreeSeq();
+
+  // mutations
+  initializeMutationRate(muN + muT);
+  initializeMutationType("m1", 0.5, "s", "if (runif(1) < 0.5) -alpha; else alpha;");
+  m1.convertToSubstitution = T;
+  initializeMutationType("m2", 0.5, "f", 0.0);
+  m2.convertToSubstitution = T;
+
+   // genomic region
+  initializeGenomicElementType("g1", c(m1, m2), c(muT, muN));
+  initializeGenomicElement(g1, 0, region_length-1);
+
+  // recombination
+  initializeRecombinationRate(rbp);
+
+  defineConstant("basename", "polygenic_nonwf_" + 
+    filename_str(c('rep', 'Vs', 'fitfunc', 'optimasd', 'K', 'alpha', 'muT', 'muN', 'rbp')));
+  defineConstant("treeseq_file", datadir + basename + "treeseq.tree");
+  // defineConstant("log_file", datadir + basename + "log.tsv.gz");
+  defineConstant("log_file", datadir + basename + "log.tsv");
+  print(log_file);
+}
+
+reproduction() {
+  subpop.addCrossed(individual, subpop.sampleIndividuals(1));
+}
+
+fitness(m1) {
+  return 1.0;
+}
+
+fitness(NULL) {
+  if (fitfunc == 'movingoptima' | fitfunc == 'optimashift') {
+    optima = sim.getValue('optima');
+    return fitness_offset + dnorm(individual.tagF - optima, mean=0.0, sd=sqrt(Vs));
+  }
+}
+
+1 early() {
+  sim.addSubpop("p1", asInteger(0.1*K));
+  sim.rescheduleScriptBlock(s1, start=2, end=end);
+  sim.rescheduleScriptBlock(s2, start=end, end=end);
+
+  // initialize optima
+  sim.setValue('optima', 0.);
+
+  pd = param_dict(c('rep', 'Vs', 'fitfunc', 'optimasd', 'K', 'alpha', 'muT', 'muN', 'rbp', 'end'));
+  log = sim.createLogFile(log_file, initialContents=pd.serialize(), sep="\t", logInterval=1);
+  log.addGeneration();
+  inds = sim.subpopulations.individuals;
+  log.addMeanSDColumns('z', 'sim.subpopulations.individuals.tagF;');
+  log.addMeanSDColumns('nmuts', 'sim.subpopulations.individuals.countOfMutationsOfType(m1);');
+  log.addCustomColumn('optima', 'sim.getValue("optima");');
+}
+
+s1 early() {
+  if (fitfunc == 'movingoptima') {
+    // optima evolution as BM
+    optima0 = sim.getValue('optima');
+    optima = optima0 + rnorm(1, 0, optimasd);
+    sim.setValue('optima', optima);
+  } else if (fitfunc == 'optimashift') {
+    if (sim.generation > shift_generation) {
+      optima0 = sim.getValue('optima');
+      optima = optimasd * sqrt(Vs);
+      sim.setValue('optima', optima);
+    }
+  }
+
+  inds = sim.subpopulations.individuals;
+  phenotypes = inds.sumOfMutationsOfType(m1);
+  // fixed trait effects
+  fixed_trait = sum(sim.substitutions.selectionCoeff * asInteger(sim.substitutions.mutationType == m1));
+  inds.tagF = phenotypes;
+
+  pheno_mean = mean(phenotypes);
+  zbar = pheno_mean + fixed_trait;
+}
+
+// density-dependent selection
+early() {
+  p1.fitnessScaling = K / p1.individualCount;
+}
+
+late() {
+  if (p1.individualCount == 0) {
+    sim.treeSeqOutput(treeseq_file);
+    sim.simulationFinished();
+  }
+}
+
+s2 late() {
+  sim.treeSeqOutput(treeseq_file);
+  sim.simulationFinished();
+}
