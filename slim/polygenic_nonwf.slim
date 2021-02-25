@@ -46,12 +46,13 @@ initialize() {
     defineConstant("muT", 1e-8);
     defineConstant("fitfunc", "optimashift");
     defineConstant("optimasd", 0.5*sqrt(Vs));
+    defineConstant("moving_bm", F);
   } 
   defineConstant("datadir", '../data/slim_sims/polygenic_nonwf/');
   defineConstant("seed", getSeed());
   defineConstant("region_length", 100e6);
   defineConstant("burnin", 10*K);
-  defineConstant("rungen", 5*K);
+  defineConstant("rungen", 10*K);
   defineConstant("end", burnin + rungen);
   defineConstant("shift_generation", burnin);
   defineConstant("fitness_offset", 0.0);
@@ -74,10 +75,9 @@ initialize() {
   initializeRecombinationRate(rbp);
 
   defineConstant("basename", "polygenic_nonwf_" + 
-    filename_str(c('rep', 'Vs', 'fitfunc', 'optimasd', 'K', 'alpha', 'muT', 'muN', 'rbp')));
+    filename_str(c('rep', 'Vs', 'fitfunc', 'optimasd', 'moving_bm', 'K', 'alpha', 'muT', 'muN', 'rbp')));
   defineConstant("treeseq_file", datadir + basename + "treeseq.tree");
-  // defineConstant("log_file", datadir + basename + "log.tsv.gz");
-  defineConstant("log_file", datadir + basename + "log.tsv");
+  defineConstant("log_file", datadir + basename + "log.tsv.gz");
   print(log_file);
 }
 
@@ -90,7 +90,7 @@ fitness(m1) {
 }
 
 fitness(NULL) {
-  if (fitfunc == 'movingoptima' | fitfunc == 'optimashift') {
+  if (fitfunc == 'moving' | fitfunc == 'shift') {
     optima = sim.getValue('optima');
     return fitness_offset + dnorm(individual.tagF - optima, mean=0.0, sd=sqrt(Vs));
   }
@@ -104,29 +104,35 @@ fitness(NULL) {
   // initialize optima
   sim.setValue('optima', 0.);
 
-  pd = param_dict(c('rep', 'Vs', 'fitfunc', 'optimasd', 'K', 'alpha', 'muT', 'muN', 'rbp', 'end'));
-  log = sim.createLogFile(log_file, initialContents=pd.serialize(), sep="\t", logInterval=1);
+  pd = param_dict(c('rep', 'Vs', 'fitfunc', 'optimasd', 'moving_bm', 'K', 'alpha', 'muT', 'muN', 'rbp', 'end'));
+  log = sim.createLogFile(log_file, initialContents="#" + pd.serialize(), compress=T, sep="\t", logInterval=1);
   log.addGeneration();
   inds = sim.subpopulations.individuals;
   log.addMeanSDColumns('z', 'sim.subpopulations.individuals.tagF;');
   log.addMeanSDColumns('nmuts', 'sim.subpopulations.individuals.countOfMutationsOfType(m1);');
   log.addCustomColumn('optima', 'sim.getValue("optima");');
+  log.addCustomColumn('N', 'p1.individualCount;');
 }
 
 s1 early() {
-  if (fitfunc == 'movingoptima') {
-    // optima evolution as BM
-    optima0 = sim.getValue('optima');
-    optima = optima0 + rnorm(1, 0, optimasd);
-    sim.setValue('optima', optima);
-  } else if (fitfunc == 'optimashift') {
-    if (sim.generation > shift_generation) {
+
+  if (sim.generation > shift_generation) {
+    if (fitfunc == 'moving') {
+      // optima evolution as BM
+      optima0 = sim.getValue('optima');
+      if (moving_bm) {
+        shift = rnorm(1, 0, optimasd);
+      } else {
+        shift = optimasd;
+      }
+      optima = optima0 + shift;
+      sim.setValue('optima', optima);
+    } else if (fitfunc == 'shift') {
       optima0 = sim.getValue('optima');
       optima = optimasd * sqrt(Vs);
       sim.setValue('optima', optima);
     }
   }
-
   inds = sim.subpopulations.individuals;
   phenotypes = inds.sumOfMutationsOfType(m1);
   // fixed trait effects
