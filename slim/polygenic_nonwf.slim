@@ -39,7 +39,8 @@ function (object)param_dict(string params) {
 
 initialize() {
   initializeSLiMModelType("nonWF");
-  defineConstant("target_neut_sites", 5000);
+  defineConstant("region_length", 100e6);
+  defineConstant("seed", getSeed());
 
   if (exists("slimgui") | (exists("defaults"))) {
     // default command line arguments; primarily for debugging.
@@ -50,18 +51,16 @@ initialize() {
     defineConstant("alpha", 0.01);
     defineConstant("muT", 1e-8);
     defineConstant("muN", 1e-8);
-    defineConstant("U", 1.5); 
+    defineConstant("muD", 1 / (2 * region_length));
     defineConstant("h", 0.3);
-    defineConstant("s", 0.01);
+    defineConstant("s", 1e-4);
     defineConstant("fitfunc", "shift");
     defineConstant("optimasd", 0.5*sqrt(Vs));
     defineConstant("moving_bm", F);
-  	 defineConstant("datadir", '.');
+ 	defineConstant("datadir", '');
   } else {
 	 defineConstant("datadir", '../data/slim_sims/polygenic_nonwf/');
   }
-  defineConstant("seed", getSeed());
-  defineConstant("region_length", 100e6);
   defineConstant("burnin", 10*K);
   defineConstant("rungen", 10*K);
   defineConstant("end", burnin + rungen);
@@ -69,11 +68,9 @@ initialize() {
   defineConstant("fitness_offset", 0.0);
 
   initializeSLiMOptions(keepPedigrees=T);
-  initializeTreeSeq();
+  // initializeTreeSeq();
 
   // mutations
-  // U is the number of mutations per diploid genome per generation
-  defineConstant("muD", U / (2 * region_length));
   initializeMutationRate(muD + muN + muT);
   initializeMutationType("m1", 0.5, "s", "if (runif(1) < 0.5) -alpha; else alpha;");
   m1.convertToSubstitution = T;
@@ -90,10 +87,10 @@ initialize() {
   initializeRecombinationRate(rbp);
 
   defineConstant("basename", "polygenic_nonwf_" + 
-    filename_str(c('rep', 'Vs', 'fitfunc', 'optimasd', 'moving_bm', 'K', 'alpha', 'muT', 'muN', 'muD', 'rbp')));
-  defineConstant("treeseq_file", datadir + basename + "treeseq.tree");
+    filename_str(c('rep', 'Vs', 'fitfunc', 'optimasd', 'moving_bm', 'K', 'alpha', 
+                   's', 'h', 'muT', 'muN', 'muD', 'rbp')));
+  // defineConstant("treeseq_file", datadir + basename + "treeseq.tree");
   defineConstant("log_file", datadir + basename + "log.tsv.gz");
-  print(log_file);
 }
 
 reproduction() {
@@ -104,10 +101,25 @@ fitness(m1) {
   return 1.0;
 }
 
+fitness(m3) {
+  // we ignore the selection coefs for speed and calc the fitness
+  // manually in the primary fitness function. This significanly
+  // increases speed.
+  return 1.0;
+}
+
 fitness(NULL) {
   if (fitfunc == 'moving' | fitfunc == 'shift') {
     optima = sim.getValue('optima');
-    return fitness_offset + dnorm(individual.tagF - optima, mean=0.0, sd=sqrt(Vs));
+    traitfit = dnorm(individual.tagF - optima, mean=0.0, sd=sqrt(Vs));
+    delmuts1 = individual.genome1.mutationCountsInGenomes(sim.mutationsOfType(m3));
+    delmuts2 = individual.genome1.mutationCountsInGenomes(sim.mutationsOfType(m3));
+    delmuts = delmuts1 + delmuts2;
+    ndelsubs = 2*sum(sim.substitutions.mutationType == m3); // 2x for diploidy
+    nhets = sum(delmuts == 1);
+    nhoms = sum(delmuts == 2);
+    delfit = (1 - h*s)^nhets * (1 - s)^nhoms * (1-s)^ndelsubs;
+    return fitness_offset + traitfit * delfit;
   }
 }
 
@@ -119,7 +131,8 @@ fitness(NULL) {
   // initialize optima
   sim.setValue('optima', 0.);
 
-  pd = param_dict(c('rep', 'Vs', 'fitfunc', 'optimasd', 'moving_bm', 'K', 'alpha', 'muT', 'muN', 'muD', 'rbp', 'end'));
+  pd = param_dict(c('rep', 'Vs', 'fitfunc', 'optimasd', 'moving_bm', 'K', 'alpha', 
+                    's', 'h', 'muT', 'muN', 'muD', 'rbp', 'end'));
   log = sim.createLogFile(log_file, initialContents="#" + pd.serialize(), compress=T, sep="\t", logInterval=1);
   log.addGeneration();
   inds = sim.subpopulations.individuals;
@@ -132,6 +145,11 @@ fitness(NULL) {
   log.addCustomColumn('sshT', 'ssh(p1, m1);');
   log.addCustomColumn('sshN', 'ssh(p1, m2);');
   log.addCustomColumn('sshD', 'ssh(p1, m3);');
+  log.addCustomColumn('nfixed_dels', '2*sum(sim.substitutions.mutationType == m3);');
+  log.addCustomColumn('fixed_load', '(1-s)^(2*sum(sim.substitutions.mutationType == m3));');
+  log.addCustomColumn('fixed_trait', '2*sum(sim.substitutions.selectionCoeff*asInteger(sim.substitutions.mutationType == m1));');
+  log.addCustomColumn('Ne', 'sim.getValue("Ne");');
+  log.addMeanSDColumns('repr', 'sim.subpopulations.individuals.reproductiveOutput;');
 }
 
 s1 early() {
@@ -142,9 +160,9 @@ s1 early() {
       // optima evolution as BM
       optima0 = sim.getValue('optima');
       if (moving_bm) {
-        shift = rnorm(1, 0, optimasd);
+        shift = rnorm(1, 0, optimasd*sqrt(Vs));
       } else {
-        shift = optimasd;
+        shift = optimasd*sqrt(Vs);
       }
       optima = optima0 + shift;
       sim.setValue('optima', optima);
@@ -154,13 +172,31 @@ s1 early() {
       sim.setValue('optima', optima);
     }
   }
+
   phenotypes = inds.sumOfMutationsOfType(m1);
   // fixed trait effects
-  fixed_trait = sum(sim.substitutions.selectionCoeff * asInteger(sim.substitutions.mutationType == m1));
-  inds.tagF = phenotypes;
+  fixed_trait = 2 * sum(sim.substitutions.selectionCoeff * asInteger(sim.substitutions.mutationType == m1));
+  inds.tagF = phenotypes + fixed_trait;
 
-  pheno_mean = mean(phenotypes);
-  zbar = pheno_mean + fixed_trait;
+  // mutation tracking for Ne on-the-fly calculation
+  if (sim.generation > 1) {
+    muts = sim.getValue('last_gen_muts');
+    f0 = sim.getValue('last_gen_freqs');
+    f1 = sim.mutationFrequencies(p1, muts);
+    if (length(f0) > 0) {
+      Ne = 0.5 * mean(f0 * (1-f0)) / var(f0 - f1);
+      sim.setValue("Ne", Ne);
+    }
+  } else {
+    sim.setValue("Ne", 0);
+  }
+  muts = sim.mutationsOfType(m2);
+  if (length(muts) > 1000) {
+    muts = sample(muts, 1000);
+  }
+  sim.setValue('last_gen_muts', muts);
+  sim.setValue('last_gen_freqs', sim.mutationFrequencies(p1, muts));
+
 }
 
 // density-dependent selection
@@ -170,12 +206,12 @@ early() {
 
 late() {
   if (p1.individualCount == 0) {
-    sim.treeSeqOutput(treeseq_file);
+    // sim.treeSeqOutput(reeseq_file);
     sim.simulationFinished();
   }
 }
 
 s2 late() {
-  sim.treeSeqOutput(treeseq_file);
+  // sim.treeSeqOutput(treeseq_file);
   sim.simulationFinished();
 }

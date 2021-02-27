@@ -7,51 +7,53 @@ SLIM = "/home/vsb/src/SLiM_build/slim "
 DATADIR = "../data/slim_sims/"
 
 ## Parameters
-reps = range(20)
+reps = range(50)
 
-ouputs = ["log.tsv.gz", "treeseq.tree"]
+ouputs = ["log.tsv.gz"]
 
 ## ===== Non-WF =====
-nonwf_params = ('rep', 'Vs', 'fitfunc', 'optimasd', 'moving_bm', 'K', 'alpha', 'muT', 'muN', 'rbp')
+nonwf_params = ('rep', 'Vs', 'fitfunc', 'optimasd', 'moving_bm', 'K', 'alpha', 's', 'h',  'muT', 'muN', 'muD', 'rbp')
 
 param_str = [v + '{' + v + '}' for v in nonwf_params]
 nonwf_pattern = 'polygenic_nonwf/polygenic_nonwf_' + '_'.join(param_str) + '_{output}'
 
 # params for moving optima
 Vs = [1]
-# K = [100, 500, 1000]
-K = [1000]
+#K = [500]
+K = [500, 450, 550]
 alpha = [0.01]
 muN = [5e-8]
-muT = [1e-7, 1e-8]
+#muT = [1e-7, 1e-8]
+muT = [1e-7]
+# if U is 2, then U / (2 * region_length) = 1e-8 if region_length = 100e6
+muD = [1e-08, 1e-09] 
 rbp = [1e-8]
+s = [1e-3, 1e-4, 1e-5]
+h = [0.3]
 
 # moving optimna
-optimasd = [0.1, 0.01, 0.001]
+# optimasd = [0.1, 0.01, 0.001, 0.0001]
+optimasd = [0.1]
 fitfunc = ['moving']
 moving_bm = ['F']
 
 nonwf_results_moving = expand(DATADIR + nonwf_pattern,
-                       rep = reps, K=K, Vs=Vs, alpha=alpha,
-                       fitfunc=fitfunc, muN=muN, muT=muT,
-                       optimasd=optimasd, moving_bm=moving_bm,
-                       rbp=rbp, output=ouputs)
+                              rep = reps, K=K, Vs=Vs, alpha=alpha,
+                              h = h, s = s,
+                              fitfunc=fitfunc, muN=muN, muT=muT, muD=muD, 
+                              optimasd=optimasd, moving_bm=moving_bm,
+                              rbp=rbp, output=ouputs)[0:10]
 
-## sudden shift
-#optimasd = [0.1]
-#fitfunc = ['shift']
-#moving_bm = ['F']
-#
-#nonwf_results_shift = expand(DATADIR + nonwf_pattern,
-#                       rep = reps, K=K, Vs=Vs, alpha=alpha,
-#                       fitfunc=fitfunc, muN=muN, muT=muT,
-#                       optimasd=optimasd, moving_bm=moving_bm,
-#                       rbp=rbp, output=ouputs)
-#
+nonwf_results_moving = []
 
-nonwf_results_shift = []
+nonwf_results_moving_nobgs = expand(DATADIR + nonwf_pattern,
+                                    rep = reps, K=K, Vs=Vs, alpha=alpha,
+                                    h = [0], s = [0],
+                                    fitfunc=fitfunc, muN=muN, muT=muT, muD=[0], 
+                                    optimasd=optimasd, moving_bm=moving_bm,
+                                    rbp=rbp, output=ouputs)
 
-nonwf_results = nonwf_results_moving + nonwf_results_shift
+nonwf_results = nonwf_results_moving + nonwf_results_moving_nobgs
 
 rule nonwf_all:
   input:
@@ -62,7 +64,7 @@ rule nonwf:
     "polygenic_nonwf.slim"
   output:
     DATADIR + nonwf_pattern.replace("{output}", "log.tsv.gz"),
-    DATADIR + nonwf_pattern.replace("{output}", "treeseq.tree")
+    #DATADIR + nonwf_pattern.replace("{output}", "treeseq.tree")
   shell:
     """
     mkdir -p {DATADIR}/nonwf/
@@ -71,7 +73,9 @@ rule nonwf:
     {SLIM} -d K={wildcards.K} \
      -d Vs={wildcards.Vs} -d rep={wildcards.rep} \
      -d alpha={wildcards.alpha} -d "fitfunc='{wildcards.fitfunc}'" -d muT={wildcards.muT} \
+     -d s={wildcards.s} -d h={wildcards.h} \
      -d muN={wildcards.muN} \
+     -d muD={wildcards.muD} \
      -d optimasd={wildcards.optimasd}  -d moving_bm={wildcards.moving_bm} \
      -d rbp={wildcards.rbp} {input}
     """
