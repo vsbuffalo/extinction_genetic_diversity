@@ -1,3 +1,8 @@
+function (float)ssh(object pop, object mut_type) {
+  x = sim.mutationFrequencies(pop, sim.mutationsOfType(mut_type));
+  return 2*sum(x * (1-x));
+}
+
 function (void)assert(logical x, [string msg = "assertion failed"]) {
   if (!x) stop(msg);
 }
@@ -44,6 +49,7 @@ initialize() {
     defineConstant("rbp", 1e-8);
     defineConstant("alpha", 0.01);
     defineConstant("muT", 1e-8);
+    defineConstant("muN", 1e-8);
     defineConstant("fitfunc", "optimashift");
     defineConstant("optimasd", 0.5*sqrt(Vs));
     defineConstant("moving_bm", F);
@@ -109,14 +115,18 @@ fitness(NULL) {
   log.addGeneration();
   inds = sim.subpopulations.individuals;
   log.addMeanSDColumns('z', 'sim.subpopulations.individuals.tagF;');
-  log.addMeanSDColumns('nmuts', 'sim.subpopulations.individuals.countOfMutationsOfType(m1);');
   log.addCustomColumn('optima', 'sim.getValue("optima");');
   log.addCustomColumn('N', 'p1.individualCount;');
+  log.addMeanSDColumns('nmutN', 'sim.subpopulations.individuals.countOfMutationsOfType(m2);');
+  log.addMeanSDColumns('nmutT', 'sim.subpopulations.individuals.countOfMutationsOfType(m1);');
+  log.addCustomColumn('sshN', 'ssh(p1, m2);');
+  log.addCustomColumn('sshT', 'ssh(p1, m1);');
 }
 
 s1 early() {
-
+  inds = sim.subpopulations.individuals;
   if (sim.generation > shift_generation) {
+    // remember individuals before the optima shift
     if (fitfunc == 'moving') {
       // optima evolution as BM
       optima0 = sim.getValue('optima');
@@ -133,7 +143,6 @@ s1 early() {
       sim.setValue('optima', optima);
     }
   }
-  inds = sim.subpopulations.individuals;
   phenotypes = inds.sumOfMutationsOfType(m1);
   // fixed trait effects
   fixed_trait = sum(sim.substitutions.selectionCoeff * asInteger(sim.substitutions.mutationType == m1));

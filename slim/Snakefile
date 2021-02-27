@@ -19,14 +19,15 @@ nonwf_pattern = 'polygenic_nonwf/polygenic_nonwf_' + '_'.join(param_str) + '_{ou
 
 # params for moving optima
 Vs = [1]
+# K = [100, 500, 1000]
 K = [100, 500, 1000]
 alpha = [0.01]
-muN = [0]
+muN = [5e-8]
 muT = [1e-7, 1e-8]
 rbp = [1e-8]
 
 # moving optimna
-optimasd = [1, 0.5, 0.1]
+optimasd = [0.1, 0.01, 0.01]
 fitfunc = ['moving']
 moving_bm = ['F', 'T']
 
@@ -36,17 +37,19 @@ nonwf_results_moving = expand(DATADIR + nonwf_pattern,
                        optimasd=optimasd, moving_bm=moving_bm,
                        rbp=rbp, output=ouputs)
 
-# sudden shift
-optimasd = [2, 1, 0.5, 0.1]
-fitfunc = ['moving']
-moving_bm = ['F']
+## sudden shift
+#optimasd = [0.1]
+#fitfunc = ['shift']
+#moving_bm = ['F']
+#
+#nonwf_results_shift = expand(DATADIR + nonwf_pattern,
+#                       rep = reps, K=K, Vs=Vs, alpha=alpha,
+#                       fitfunc=fitfunc, muN=muN, muT=muT,
+#                       optimasd=optimasd, moving_bm=moving_bm,
+#                       rbp=rbp, output=ouputs)
+#
 
-nonwf_results_shift = expand(DATADIR + nonwf_pattern,
-                       rep = reps, K=K, Vs=Vs, alpha=alpha,
-                       fitfunc=fitfunc, muN=muN, muT=muT,
-                       optimasd=optimasd, moving_bm=moving_bm,
-                       rbp=rbp, output=ouputs)
-
+nonwf_results_shift = []
 
 nonwf_results = nonwf_results_moving + nonwf_results_shift
 
