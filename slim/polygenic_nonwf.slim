@@ -45,7 +45,7 @@ initialize() {
     // default command line arguments; primarily for debugging.
     defineConstant("rep", 0);
     defineConstant("Vs", 1);
-    defineConstant("K", 500);
+    defineConstant("K", 100);
     defineConstant("rbp", 1e-8);
     defineConstant("alpha", 0.01);
     defineConstant("muT", 1e-8);
@@ -53,7 +53,7 @@ initialize() {
     defineConstant("U", 1.5); 
     defineConstant("h", 0.3);
     defineConstant("s", 0.01);
-    defineConstant("fitfunc", "optimashift");
+    defineConstant("fitfunc", "shift");
     defineConstant("optimasd", 0.5*sqrt(Vs));
     defineConstant("moving_bm", F);
   	 defineConstant("datadir", '.');
