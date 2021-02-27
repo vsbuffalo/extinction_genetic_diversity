@@ -56,8 +56,10 @@ initialize() {
     defineConstant("fitfunc", "optimashift");
     defineConstant("optimasd", 0.5*sqrt(Vs));
     defineConstant("moving_bm", F);
-  } 
-  defineConstant("datadir", '../data/slim_sims/polygenic_nonwf/');
+  	 defineConstant("datadir", '.');
+  } else {
+	 defineConstant("datadir", '../data/slim_sims/polygenic_nonwf/');
+  }
   defineConstant("seed", getSeed());
   defineConstant("region_length", 100e6);
   defineConstant("burnin", 10*K);
@@ -77,7 +79,7 @@ initialize() {
   m1.convertToSubstitution = T;
   initializeMutationType("m2", 0.5, "f", 0.0);
   m2.convertToSubstitution = T;
-  initializeMutationType("m2", h, "f", s);
+  initializeMutationType("m3", h, "f", s);
   m3.convertToSubstitution = T;
 
    // genomic region
