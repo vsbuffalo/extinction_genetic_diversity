@@ -50,6 +50,9 @@ initialize() {
     defineConstant("alpha", 0.01);
     defineConstant("muT", 1e-8);
     defineConstant("muN", 1e-8);
+    defineConstant("U", 1.5); 
+    defineConstant("h", 0.3);
+    defineConstant("s", 0.01);
     defineConstant("fitfunc", "optimashift");
     defineConstant("optimasd", 0.5*sqrt(Vs));
     defineConstant("moving_bm", F);
@@ -67,21 +70,25 @@ initialize() {
   initializeTreeSeq();
 
   // mutations
-  initializeMutationRate(muN + muT);
+  // U is the number of mutations per diploid genome per generation
+  defineConstant("muD", U / (2 * region_length));
+  initializeMutationRate(muD + muN + muT);
   initializeMutationType("m1", 0.5, "s", "if (runif(1) < 0.5) -alpha; else alpha;");
   m1.convertToSubstitution = T;
   initializeMutationType("m2", 0.5, "f", 0.0);
   m2.convertToSubstitution = T;
+  initializeMutationType("m2", h, "f", s);
+  m3.convertToSubstitution = T;
 
    // genomic region
-  initializeGenomicElementType("g1", c(m1, m2), c(muT, muN));
+  initializeGenomicElementType("g1", c(m1, m2, m3), c(muT, muN, muD));
   initializeGenomicElement(g1, 0, region_length-1);
 
   // recombination
   initializeRecombinationRate(rbp);
 
   defineConstant("basename", "polygenic_nonwf_" + 
-    filename_str(c('rep', 'Vs', 'fitfunc', 'optimasd', 'moving_bm', 'K', 'alpha', 'muT', 'muN', 'rbp')));
+    filename_str(c('rep', 'Vs', 'fitfunc', 'optimasd', 'moving_bm', 'K', 'alpha', 'muT', 'muN', 'muD', 'rbp')));
   defineConstant("treeseq_file", datadir + basename + "treeseq.tree");
   defineConstant("log_file", datadir + basename + "log.tsv.gz");
   print(log_file);
@@ -110,17 +117,19 @@ fitness(NULL) {
   // initialize optima
   sim.setValue('optima', 0.);
 
-  pd = param_dict(c('rep', 'Vs', 'fitfunc', 'optimasd', 'moving_bm', 'K', 'alpha', 'muT', 'muN', 'rbp', 'end'));
+  pd = param_dict(c('rep', 'Vs', 'fitfunc', 'optimasd', 'moving_bm', 'K', 'alpha', 'muT', 'muN', 'muD', 'rbp', 'end'));
   log = sim.createLogFile(log_file, initialContents="#" + pd.serialize(), compress=T, sep="\t", logInterval=1);
   log.addGeneration();
   inds = sim.subpopulations.individuals;
   log.addMeanSDColumns('z', 'sim.subpopulations.individuals.tagF;');
   log.addCustomColumn('optima', 'sim.getValue("optima");');
   log.addCustomColumn('N', 'p1.individualCount;');
-  log.addMeanSDColumns('nmutN', 'sim.subpopulations.individuals.countOfMutationsOfType(m2);');
   log.addMeanSDColumns('nmutT', 'sim.subpopulations.individuals.countOfMutationsOfType(m1);');
-  log.addCustomColumn('sshN', 'ssh(p1, m2);');
+  log.addMeanSDColumns('nmutN', 'sim.subpopulations.individuals.countOfMutationsOfType(m2);');
+  log.addMeanSDColumns('nmutD', 'sim.subpopulations.individuals.countOfMutationsOfType(m3);');
   log.addCustomColumn('sshT', 'ssh(p1, m1);');
+  log.addCustomColumn('sshN', 'ssh(p1, m2);');
+  log.addCustomColumn('sshD', 'ssh(p1, m3);');
 }
 
 s1 early() {

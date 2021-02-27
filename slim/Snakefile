@@ -20,16 +20,16 @@ nonwf_pattern = 'polygenic_nonwf/polygenic_nonwf_' + '_'.join(param_str) + '_{ou
 # params for moving optima
 Vs = [1]
 # K = [100, 500, 1000]
-K = [100, 500, 1000]
+K = [1000]
 alpha = [0.01]
 muN = [5e-8]
 muT = [1e-7, 1e-8]
 rbp = [1e-8]
 
 # moving optimna
-optimasd = [0.1, 0.01, 0.01]
+optimasd = [0.1, 0.01, 0.001]
 fitfunc = ['moving']
-moving_bm = ['F', 'T']
+moving_bm = ['F']
 
 nonwf_results_moving = expand(DATADIR + nonwf_pattern,
                        rep = reps, K=K, Vs=Vs, alpha=alpha,
