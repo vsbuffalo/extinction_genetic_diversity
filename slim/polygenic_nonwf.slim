@@ -46,17 +46,17 @@ initialize() {
     // default command line arguments; primarily for debugging.
     defineConstant("rep", 0);
     defineConstant("Vs", 1);
-    defineConstant("K", 100);
+    defineConstant("K", 500);
     defineConstant("rbp", 1e-8);
     defineConstant("alpha", 0.01);
     defineConstant("muT", 1e-8);
     defineConstant("muN", 1e-8);
     defineConstant("muD", 1 / (2 * region_length));
     defineConstant("h", 0.3);
-    defineConstant("s", 1e-4);
+    defineConstant("s", 1e-2);
     defineConstant("fitfunc", "shift");
     defineConstant("optimasd", 0.5*sqrt(Vs));
-    defineConstant("moving_bm", F);
+    defineConstant("optimabm", F);
  	defineConstant("datadir", '');
   } else {
 	 defineConstant("datadir", '../data/slim_sims/polygenic_nonwf/');
@@ -87,7 +87,7 @@ initialize() {
   initializeRecombinationRate(rbp);
 
   defineConstant("basename", "polygenic_nonwf_" + 
-    filename_str(c('rep', 'Vs', 'fitfunc', 'optimasd', 'moving_bm', 'K', 'alpha', 
+    filename_str(c('rep', 'Vs', 'fitfunc', 'optimasd', 'optimabm', 'K', 'alpha', 
                    's', 'h', 'muT', 'muN', 'muD', 'rbp')));
   // defineConstant("treeseq_file", datadir + basename + "treeseq.tree");
   defineConstant("log_file", datadir + basename + "log.tsv.gz");
@@ -101,27 +101,28 @@ fitness(m1) {
   return 1.0;
 }
 
-fitness(m3) {
-  // we ignore the selection coefs for speed and calc the fitness
-  // manually in the primary fitness function. This significanly
-  // increases speed.
-  return 1.0;
-}
+// fitness(m3) {
+//   // we ignore the selection coefs for speed and calc the fitness
+//   // manually in the primary fitness function. This significanly
+//   // increases speed.
+//   return 1.0;
+// }
 
-fitness(NULL) {
-  if (fitfunc == 'moving' | fitfunc == 'shift') {
-    optima = sim.getValue('optima');
-    traitfit = dnorm(individual.tagF - optima, mean=0.0, sd=sqrt(Vs));
-    delmuts1 = individual.genome1.mutationCountsInGenomes(sim.mutationsOfType(m3));
-    delmuts2 = individual.genome1.mutationCountsInGenomes(sim.mutationsOfType(m3));
-    delmuts = delmuts1 + delmuts2;
-    ndelsubs = 2*sum(sim.substitutions.mutationType == m3); // 2x for diploidy
-    nhets = sum(delmuts == 1);
-    nhoms = sum(delmuts == 2);
-    delfit = (1 - h*s)^nhets * (1 - s)^nhoms * (1-s)^ndelsubs;
-    return fitness_offset + traitfit * delfit;
-  }
-}
+// fitness(NULL) {
+//   if (fitfunc == 'moving' | fitfunc == 'shift') {
+//     optima = sim.getValue('optima');
+//     traitfit = dnorm(individual.tagF - optima, mean=0.0, sd=sqrt(Vs));
+//     delmuts1 = individual.genome1.mutationCountsInGenomes(sim.mutationsOfType(m3));
+//     delmuts2 = individual.genome2.mutationCountsInGenomes(sim.mutationsOfType(m3));
+//     delmuts = delmuts1 + delmuts2;
+//     ndelsubs = 2*sum(sim.substitutions.mutationType == m3); // 2x for diploidy
+//     nhets = sum(delmuts == 1);
+//     nhoms = sum(delmuts == 2);
+//     delfit = (1 - h*s)^nhets * (1 - s)^nhoms * (1-s)^ndelsubs;
+//     fitn = fitness_offset + traitfit * delfit / dnorm(0.0, mean=0.0, sd=sqrt(Vs));
+//     return fitn;
+//   }
+// }
 
 1 early() {
   sim.addSubpop("p1", asInteger(0.1*K));
@@ -131,7 +132,7 @@ fitness(NULL) {
   // initialize optima
   sim.setValue('optima', 0.);
 
-  pd = param_dict(c('rep', 'Vs', 'fitfunc', 'optimasd', 'moving_bm', 'K', 'alpha', 
+  pd = param_dict(c('rep', 'Vs', 'fitfunc', 'optimasd', 'optimabm', 'K', 'alpha', 
                     's', 'h', 'muT', 'muN', 'muD', 'rbp', 'end'));
   log = sim.createLogFile(log_file, initialContents="#" + pd.serialize(), compress=T, sep="\t", logInterval=1);
   log.addGeneration();
@@ -153,13 +154,14 @@ fitness(NULL) {
 }
 
 s1 early() {
+  print(sim.generation);
   inds = sim.subpopulations.individuals;
   if (sim.generation > shift_generation) {
     // remember individuals before the optima shift
     if (fitfunc == 'moving') {
       // optima evolution as BM
       optima0 = sim.getValue('optima');
-      if (moving_bm) {
+      if (optimabm) {
         shift = rnorm(1, 0, optimasd*sqrt(Vs));
       } else {
         shift = optimasd*sqrt(Vs);
@@ -176,7 +178,16 @@ s1 early() {
   phenotypes = inds.sumOfMutationsOfType(m1);
   // fixed trait effects
   fixed_trait = 2 * sum(sim.substitutions.selectionCoeff * asInteger(sim.substitutions.mutationType == m1));
-  inds.tagF = phenotypes + fixed_trait;
+  inds.tagF = phenotypes; //+ fixed_trait;
+
+  // a faster way to calculate fitness
+  optima = sim.getValue('optima');
+
+
+  // we need to factor in the fixed load, since mutations
+  // are converted to substitutions
+  ndelsubs = 2*sum(sim.substitutions.mutationType == m3); // 2x for diploidy
+  inds.fitnessScaling = dnorm(phenotypes + fixed_trait - optima, mean=0.0, sd=sqrt(Vs)) * (1-s)^ndelsubs;
 
   // mutation tracking for Ne on-the-fly calculation
   if (sim.generation > 1) {

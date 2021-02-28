@@ -12,7 +12,7 @@ reps = range(50)
 ouputs = ["log.tsv.gz"]
 
 ## ===== Non-WF =====
-nonwf_params = ('rep', 'Vs', 'fitfunc', 'optimasd', 'moving_bm', 'K', 'alpha', 's', 'h',  'muT', 'muN', 'muD', 'rbp')
+nonwf_params = ('rep', 'Vs', 'fitfunc', 'optimasd', 'optimabm', 'K', 'alpha', 's', 'h',  'muT', 'muN', 'muD', 'rbp')
 
 param_str = [v + '{' + v + '}' for v in nonwf_params]
 nonwf_pattern = 'polygenic_nonwf/polygenic_nonwf_' + '_'.join(param_str) + '_{output}'
@@ -35,22 +35,20 @@ h = [0.3]
 # optimasd = [0.1, 0.01, 0.001, 0.0001]
 optimasd = [0.1]
 fitfunc = ['moving']
-moving_bm = ['F']
+optimabm = ['F']
 
 nonwf_results_moving = expand(DATADIR + nonwf_pattern,
                               rep = reps, K=K, Vs=Vs, alpha=alpha,
                               h = h, s = s,
                               fitfunc=fitfunc, muN=muN, muT=muT, muD=muD, 
-                              optimasd=optimasd, moving_bm=moving_bm,
-                              rbp=rbp, output=ouputs)[0:10]
-
-nonwf_results_moving = []
+                              optimasd=optimasd, optimabm=optimabm,
+                              rbp=rbp, output=ouputs)
 
 nonwf_results_moving_nobgs = expand(DATADIR + nonwf_pattern,
                                     rep = reps, K=K, Vs=Vs, alpha=alpha,
                                     h = [0], s = [0],
                                     fitfunc=fitfunc, muN=muN, muT=muT, muD=[0], 
-                                    optimasd=optimasd, moving_bm=moving_bm,
+                                    optimasd=optimasd, optimabm=optimabm,
                                     rbp=rbp, output=ouputs)
 
 nonwf_results = nonwf_results_moving + nonwf_results_moving_nobgs
@@ -76,7 +74,7 @@ rule nonwf:
      -d s={wildcards.s} -d h={wildcards.h} \
      -d muN={wildcards.muN} \
      -d muD={wildcards.muD} \
-     -d optimasd={wildcards.optimasd}  -d moving_bm={wildcards.moving_bm} \
+     -d optimasd={wildcards.optimasd}  -d optimabm={wildcards.optimabm} \
      -d rbp={wildcards.rbp} {input}
     """
 
