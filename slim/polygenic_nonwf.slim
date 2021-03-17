@@ -51,9 +51,12 @@ initialize() {
     defineConstant("alpha", 0.01);
     defineConstant("muT", 1e-8);
     defineConstant("muN", 1e-8);
-    defineConstant("muD", 1 / (2 * region_length));
-    defineConstant("h", 0.3);
+    //defineConstant("muD", 1 / (2 * region_length));
+    defineConstant("muD", 0);
+    defineConstant("h", 0.5);
     defineConstant("s", 1e-2);
+    defineConstant("a", 0.01); // alpha in epistasis model
+    defineConstant("b", 0.01); // beta in epistasis model
     defineConstant("fitfunc", "shift");
     defineConstant("optimasd", 0.5*sqrt(Vs));
     defineConstant("optimabm", F);
@@ -101,12 +104,12 @@ fitness(m1) {
   return 1.0;
 }
 
-// fitness(m3) {
-//   // we ignore the selection coefs for speed and calc the fitness
-//   // manually in the primary fitness function. This significanly
-//   // increases speed.
-//   return 1.0;
-// }
+fitness(m3) {
+  // these have no fitness effects directly because 
+  // we need to impose this through a synergistic epistasis
+  // function
+  return 1.0;
+}
 
 // fitness(NULL) {
 //   if (fitfunc == 'moving' | fitfunc == 'shift') {
@@ -154,7 +157,7 @@ fitness(m1) {
 }
 
 s1 early() {
-  print(sim.generation);
+  //print(sim.generation);
   inds = sim.subpopulations.individuals;
   if (sim.generation > shift_generation) {
     // remember individuals before the optima shift
@@ -183,6 +186,9 @@ s1 early() {
   // a faster way to calculate fitness
   optima = sim.getValue('optima');
 
+  // synergistic epistasis load
+  nmuts = inds.sumOfMutationsOfType(m3);
+  del_fitness = exp(- (a * nmuts + 0.5 * b^2));
 
   // we need to factor in the fixed load, since mutations
   // are converted to substitutions
@@ -195,7 +201,8 @@ s1 early() {
     f0 = sim.getValue('last_gen_freqs');
     f1 = sim.mutationFrequencies(p1, muts);
     if (length(f0) > 0) {
-      Ne = 0.5 * mean(f0 * (1-f0)) / var(f0 - f1);
+      // Ne = 0.5 * mean(f0 * (1-f0)) / var(f0 - f1);
+      Ne = 0.5 * var(f0 * (1-f0) / (f0 - f1));
       sim.setValue("Ne", Ne);
     }
   } else {
