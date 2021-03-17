@@ -37,6 +37,15 @@ function (object)param_dict(string params) {
   return pd;
 }
 
+function (float) standard_fitness(object ind, object mut_type, float ss, float hh) {
+  delmuts1 = ind.genome1.mutationCountsInGenomes(sim.mutationsOfType(mut_type));
+  delmuts2 = ind.genome2.mutationCountsInGenomes(sim.mutationsOfType(mut_type));
+  delmuts = delmuts1 + delmuts2;
+  nhets = sum(delmuts == 1);
+  nhoms = sum(delmuts == 2);
+  return (1 - hh*ss)^nhets * (1 - ss)^nhoms;
+}
+
 initialize() {
   initializeSLiMModelType("nonWF");
   defineConstant("region_length", 100e6);
@@ -51,12 +60,12 @@ initialize() {
     defineConstant("alpha", 0.01);
     defineConstant("muT", 1e-8);
     defineConstant("muN", 1e-8);
-    //defineConstant("muD", 1 / (2 * region_length));
-    defineConstant("muD", 0);
-    defineConstant("h", 0.5);
-    defineConstant("s", 1e-2);
-    defineConstant("a", 0.01); // alpha in epistasis model
-    defineConstant("b", 0.01); // beta in epistasis model
+    defineConstant("muD", 1e-9);
+    defineConstant("synergistic", F);
+    defineConstant("a", 2e-3); // alpha in epistasis model
+    defineConstant("b", 8e-4); // beta in epistasis model
+    defineConstant("h", 0.3);
+    defineConstant("s", (1 - exp(-a - b/2))/h);
     defineConstant("fitfunc", "shift");
     defineConstant("optimasd", 0.5*sqrt(Vs));
     defineConstant("optimabm", F);
@@ -111,24 +120,9 @@ fitness(m3) {
   return 1.0;
 }
 
-// fitness(NULL) {
-//   if (fitfunc == 'moving' | fitfunc == 'shift') {
-//     optima = sim.getValue('optima');
-//     traitfit = dnorm(individual.tagF - optima, mean=0.0, sd=sqrt(Vs));
-//     delmuts1 = individual.genome1.mutationCountsInGenomes(sim.mutationsOfType(m3));
-//     delmuts2 = individual.genome2.mutationCountsInGenomes(sim.mutationsOfType(m3));
-//     delmuts = delmuts1 + delmuts2;
-//     ndelsubs = 2*sum(sim.substitutions.mutationType == m3); // 2x for diploidy
-//     nhets = sum(delmuts == 1);
-//     nhoms = sum(delmuts == 2);
-//     delfit = (1 - h*s)^nhets * (1 - s)^nhoms * (1-s)^ndelsubs;
-//     fitn = fitness_offset + traitfit * delfit / dnorm(0.0, mean=0.0, sd=sqrt(Vs));
-//     return fitn;
-//   }
-// }
 
 1 early() {
-  sim.addSubpop("p1", asInteger(0.1*K));
+  sim.addSubpop("p1", asInteger(K));
   sim.rescheduleScriptBlock(s1, start=2, end=end);
   sim.rescheduleScriptBlock(s2, start=end, end=end);
 
@@ -178,22 +172,30 @@ s1 early() {
     }
   }
 
+
+  // deleterious mutation fitness effects  
+  // we need to factor in the fixed load, since mutations
+  // are converted to substitutions
+  ndelsubs = 2*sum(sim.substitutions.mutationType == m3); // 2x for diploidy  
+  fixed_load = (1-s)^ndelsubs;
+  if (synergistic) {
+    ndel = inds.countOfMutationsOfType(m3);
+    del_fitness = exp(-(a * ndel + 0.5 * b * ndel^2));
+  } else {
+    del_fitness = sapply(inds, 'standard_fitness(applyValue, m3, s, h);');
+  }
+  
   phenotypes = inds.sumOfMutationsOfType(m1);
   // fixed trait effects
   fixed_trait = 2 * sum(sim.substitutions.selectionCoeff * asInteger(sim.substitutions.mutationType == m1));
-  inds.tagF = phenotypes; //+ fixed_trait;
+  inds.tagF = phenotypes;
 
   // a faster way to calculate fitness
   optima = sim.getValue('optima');
 
-  // synergistic epistasis load
-  nmuts = inds.sumOfMutationsOfType(m3);
-  del_fitness = exp(- (a * nmuts + 0.5 * b^2));
 
-  // we need to factor in the fixed load, since mutations
-  // are converted to substitutions
-  ndelsubs = 2*sum(sim.substitutions.mutationType == m3); // 2x for diploidy
-  inds.fitnessScaling = dnorm(phenotypes + fixed_trait - optima, mean=0.0, sd=sqrt(Vs)) * (1-s)^ndelsubs;
+  inds.fitnessScaling = dnorm(phenotypes + fixed_trait - optima, mean=0.0, sd=sqrt(Vs)) * del_fitness * fixed_load;
+  catn(sim.generation + ": del_fitness = " + mean(del_fitness) + ", #del subs = " + ndelsubs + ", fixed load = " + fixed_load + ", N = " + p1.individualCount);
 
   // mutation tracking for Ne on-the-fly calculation
   if (sim.generation > 1) {
