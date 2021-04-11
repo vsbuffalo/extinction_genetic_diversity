@@ -1,9 +1,12 @@
 import itertools
+from functools import partial
 import numpy as np
 np.random.seed(1)
 
-SLIM = "/home/vsb/src/SLiM_build/slim "
-# SLIM = 'slim '
+null = "NULL" # for null parameters to slim
+
+#SLIM = "/home/vsb/src/SLiM_build/slim "
+SLIM = 'slim '
 DATADIR = "../data/slim_sims/"
 
 ## Parameters
@@ -11,78 +14,79 @@ reps = range(50)
 
 ouputs = ["log.tsv.gz"]
 
-## ===== Non-WF =====
-nonwf_params = ('rep', 'Vs', 'fitfunc', 'optimasd', 'optimabm', 'K', 'alpha', 's', 'h',  'muT', 'muN', 'muD', 'rbp')
+## Functions
 
-param_str = [v + '{' + v + '}' for v in nonwf_params]
-nonwf_pattern = 'polygenic_nonwf/polygenic_nonwf_' + '_'.join(param_str) + '_{output}'
+def param_grid(**kwargs):
+  params = []
+  for param, values in kwargs.items():
+    if len(values):
+      params.append([(param, v) for v in values])
+    else:
+      params.append([(param, '')])
+  return list(map(dict, itertools.product(*params)))
 
-# params for moving optima
-Vs = [1]
-#K = [500]
-K = [500, 450, 550]
-alpha = [0.01]
-muN = [5e-8]
-#muT = [1e-7, 1e-8]
-muT = [1e-7]
-# if U is 2, then U / (2 * region_length) = 1e-8 if region_length = 100e6
-muD = [1e-08, 1e-09] 
-rbp = [1e-8]
-s = [1e-3, 1e-4, 1e-5]
-h = [0.3]
+def filename_pattern(base, params):
+  param_str = [v + '{' + v + '}' for v in params]
+  pattern = base + '_'.join(param_str) + '_{{output}}'
+  return pattern
 
-# moving optimna
-# optimasd = [0.1, 0.01, 0.001, 0.0001]
-optimasd = [0.1]
-fitfunc = ['moving']
-optimabm = ['F']
+def slim_call(params, slim_cmd="slim"):
+  call_args = [f"-d {p}={{wildcards.{p}}}" for p in params]
+  return f"{slim_cmd} " + " ".join(call_args)
+  
 
-nonwf_results_moving = expand(DATADIR + nonwf_pattern,
-                              rep = reps, K=K, Vs=Vs, alpha=alpha,
-                              h = h, s = s,
-                              fitfunc=fitfunc, muN=muN, muT=muT, muD=muD, 
-                              optimasd=optimasd, optimabm=optimabm,
-                              rbp=rbp, output=ouputs)
+## ===== Gamma DFE =====
+nonwf_params = ('rep', 'Vs', 'fitfunc', 'synergistic', 'dfe', 'shape', 'optimasd', 
+                'optimabm', 'K', 'alpha', 's', 'h', 'muT', 'muN', 'muD', 'rbp')
 
-nonwf_results_moving_nobgs = expand(DATADIR + nonwf_pattern,
-                                    rep = reps, K=K, Vs=Vs, alpha=alpha,
-                                    h = [0], s = [0],
-                                    fitfunc=fitfunc, muN=muN, muT=muT, muD=[0], 
-                                    optimasd=optimasd, optimabm=optimabm,
-                                    rbp=rbp, output=ouputs)
+# must be in same order as the SLiM params
+dfe_params = dict(rep=reps,
+                  Vs=[null],
+                  fitfunc=[null],
+                  synergistic=['F'],
+                  dfe=['T'],
+                  shape = [0.19],
+                  optimasd=[null],
+                  optimabm=[null],
+                  K = [100, 500, 1000, 5000, 10000],
+                  alpha=[0],
+                  s = [0.014],
+                  h = [0.3],
+                  muT = [0],
+                  muN = [5e-8],
+                  # if U is 2, then U / (2 * region_length) = 1e-8 
+                  # if region_length = 100e6
+                  muD = [1e-08, 1e-09],
+                  rbp = [1e-8])
 
-nonwf_results = nonwf_results_moving + nonwf_results_moving_nobgs
+dfe_param_list = list(param_grid(**dfe_params))
+nonwf_dfe_pattern = filename_pattern(DATADIR + 'nonwf/dfe_', dfe_params)
 
-rule nonwf_all:
+#print(nonwf_dfe_pattern)
+#print(dfe_param_list)
+
+
+nonwf_dfe_results = [nonwf_dfe_pattern.format(**p).format(output='log.tsv.gz') 
+                     for p in dfe_param_list]
+#print(nonwf_dfe_pattern)
+#print( nonwf_dfe_pattern.replace("{{output}}", "log.tsv.gz"))
+
+rule nonwf_dfe_all:
   input:
-    nonwf_results
+    nonwf_dfe_results
 
-rule nonwf:
+rule nonwf_dfe:
   input:
     "polygenic_nonwf.slim"
   output:
-    DATADIR + nonwf_pattern.replace("{output}", "log.tsv.gz"),
-    #DATADIR + nonwf_pattern.replace("{output}", "treeseq.tree")
+    nonwf_dfe_pattern.replace("{{output}}", "log.tsv.gz"),
   shell:
-    """
-    mkdir -p {DATADIR}/nonwf/
-
-    # the output files are automatically generated from the SLiM script
-    {SLIM} -d K={wildcards.K} \
-     -d Vs={wildcards.Vs} -d rep={wildcards.rep} \
-     -d alpha={wildcards.alpha} -d "fitfunc='{wildcards.fitfunc}'" -d muT={wildcards.muT} \
-     -d s={wildcards.s} -d h={wildcards.h} \
-     -d muN={wildcards.muN} \
-     -d muD={wildcards.muD} \
-     -d optimasd={wildcards.optimasd}  -d optimabm={wildcards.optimabm} \
-     -d rbp={wildcards.rbp} {input}
-    """
-
+    f"mkdir -p {DATADIR}/nonwf/ \n" + slim_call(dfe_params, SLIM) + " {input} "
 
 
 ## ===== Setup =====
 
 rule all:
 	input:
-		nonwf_results
+		nonwf_dfe_results
 

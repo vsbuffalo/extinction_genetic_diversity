@@ -54,27 +54,61 @@ initialize() {
   if (exists("slimgui") | (exists("defaults"))) {
     // default command line arguments; primarily for debugging.
     defineConstant("rep", 0);
-    defineConstant("Vs", 1);
     defineConstant("K", 500);
     defineConstant("rbp", 1e-8);
-    defineConstant("alpha", 0.01);
-    defineConstant("muT", 1e-8);
-    defineConstant("muN", 1e-8);
-    defineConstant("muD", 1e-9);
-    defineConstant("synergistic", F);
-    defineConstant("a", 2e-3); // alpha in epistasis model
-    defineConstant("b", 8e-4); // beta in epistasis model
-    defineConstant("h", 0.3);
-    defineConstant("s", (1 - exp(-a - b/2))/h);
-    defineConstant("fitfunc", "shift");
-    defineConstant("optimasd", 0.5*sqrt(Vs));
-    defineConstant("optimabm", F);
- 	defineConstant("datadir", '');
+
+    // mutations -- sets mode
+    defineConstant("muT", 1e-8); // trait allele mutation rate
+    defineConstant("muN", 1e-8); // neutral mutation rate
+    defineConstant("muD", 1e-9); // deleterious mutation rate
+
+    // for trait mutations
+    if (muT > 0) {
+      defineConstant("Vs", 1);
+      defineConstant("alpha", 0.01);
+      defineConstant("fitfunc", "shift");
+      defineConstant("optimasd", 0.5*sqrt(Vs));
+      defineConstant("optimabm", F);
+    } else {
+      defineConstant("Vs", NULL);
+      defineConstant("alpha", NULL);
+      defineConstant("fitfunc", NULL);
+      defineConstant("optimasd", NULL);
+      defineConstant("optimabm", NULL);
+    }
+ 
+    // for deleterious mutatutions
+    if (muD > 0) {
+      defineConstant("dfe", T);
+      defineConstant("synergistic", T);
+      defineConstant("a", 2e-3); // alpha in epistasis model
+      defineConstant("b", 8e-4); // beta in epistasis model
+      defineConstant("h", 0.3);
+      // the default s is based on the default a and b values; see notebook
+      if (!dfe) {
+        defineConstant("s", 0.25/K); // 1 = 4Ns
+        defineConstant("shape", NULL);
+      } else {
+        // defaults from Huber et al., Human
+        defineConstant("s", 0.014208);
+        defineConstant("shape", 0.19);
+      }
+    } else {
+      defineConstant("dfe", NULL);
+      defineConstant("synergistic", NULL);
+      defineConstant("a", NULL);
+      defineConstant("b", NULL);
+      defineConstant("h", NULL);
+      defineConstant("shape", NULL);
+    }
+	defineConstant("datadir", '');
   } else {
-	 defineConstant("datadir", '../data/slim_sims/polygenic_nonwf/');
+	 defineConstant("datadir", '../data/slim_sims/nonwf/');
   }
+  
+  // runtime settings
   defineConstant("burnin", 10*K);
-  defineConstant("rungen", 10*K);
+  defineConstant("rungen", 100*K);
   defineConstant("end", burnin + rungen);
   defineConstant("shift_generation", burnin);
   defineConstant("fitness_offset", 0.0);
@@ -82,25 +116,52 @@ initialize() {
   initializeSLiMOptions(keepPedigrees=T);
   // initializeTreeSeq();
 
-  // mutations
-  initializeMutationRate(muD + muN + muT);
-  initializeMutationType("m1", 0.5, "s", "if (runif(1) < 0.5) -alpha; else alpha;");
-  m1.convertToSubstitution = T;
-  initializeMutationType("m2", 0.5, "f", 0.0);
-  m2.convertToSubstitution = T;
-  initializeMutationType("m3", h, "f", s);
-  m3.convertToSubstitution = T;
+  // modes
+  defineConstant("trait", muT > 0); // trait selection, i.e. optima shift
+  defineConstant("del", muD > 0);   // deleterious mutations
 
+  // mutations
+  mut_types = c();
+  mut_rates = c();
+
+  // all mutations
+  initializeMutationRate(muN + muD + muT);
+
+  // neutral mutations
+  initializeMutationType("m1", 0.5, "f", 0.0);
+  m1.convertToSubstitution = T;
+  mut_types = c(mut_types, m1);
+  mut_rates = c(mut_rates, muN);
+ 
+  // trait mutations
+  if (trait) {
+    initializeMutationType("m2", 0.5, "s", "if (runif(1) < 0.5) -alpha; else alpha;");
+    m2.convertToSubstitution = T;
+    mut_types = c(mut_types, m2);
+    mut_rates = c(mut_rates, muT);
+  } 
+
+  // deleterious mutations
+  if (del) {
+    if (dfe) {
+      initializeMutationType("m3", h, "g", -s, shape);
+    } else {
+      initializeMutationType("m3", h, "f", -s);
+    }
+    m3.convertToSubstitution = T;
+    mut_types = c(mut_types, m3);
+    mut_rates = c(mut_rates, muD);
+  } 
    // genomic region
-  initializeGenomicElementType("g1", c(m1, m2, m3), c(muT, muN, muD));
+  initializeGenomicElementType("g1", mut_types, mut_rates);
   initializeGenomicElement(g1, 0, region_length-1);
 
   // recombination
   initializeRecombinationRate(rbp);
 
-  defineConstant("basename", "polygenic_nonwf_" + 
-    filename_str(c('rep', 'Vs', 'fitfunc', 'optimasd', 'optimabm', 'K', 'alpha', 
-                   's', 'h', 'muT', 'muN', 'muD', 'rbp')));
+  defineConstant("basename", "dfe_" + 
+    filename_str(c('rep', 'Vs', 'fitfunc', 'synergistic', 'dfe', 'shape', 'optimasd', 
+                   'optimabm', 'K', 'alpha', 's', 'h', 'muT', 'muN', 'muD', 'rbp')));
   // defineConstant("treeseq_file", datadir + basename + "treeseq.tree");
   defineConstant("log_file", datadir + basename + "log.tsv.gz");
 }
@@ -109,14 +170,13 @@ reproduction() {
   subpop.addCrossed(individual, subpop.sampleIndividuals(1));
 }
 
-fitness(m1) {
+fitness(m2) {
   return 1.0;
 }
 
 fitness(m3) {
-  // these have no fitness effects directly because 
-  // we need to impose this through a synergistic epistasis
-  // function
+  // these have no fitness effects directly because we need to impose this 
+  // manually, optionally through a synergistic epistasis function
   return 1.0;
 }
 
@@ -129,72 +189,103 @@ fitness(m3) {
   // initialize optima
   sim.setValue('optima', 0.);
 
-  pd = param_dict(c('rep', 'Vs', 'fitfunc', 'optimasd', 'optimabm', 'K', 'alpha', 
-                    's', 'h', 'muT', 'muN', 'muD', 'rbp', 'end'));
+  pd = param_dict(c('rep', 'Vs', 'fitfunc', 'synergistic', 'dfe', 'shape', 'optimasd', 
+                    'optimabm', 'K', 'alpha', 's', 'h', 
+                    'muT', 'muN', 'muD', 'rbp', 'end'));
   log = sim.createLogFile(log_file, initialContents="#" + pd.serialize(), compress=T, sep="\t", logInterval=1);
   log.addGeneration();
-  inds = sim.subpopulations.individuals;
-  log.addMeanSDColumns('z', 'sim.subpopulations.individuals.tagF;');
-  log.addCustomColumn('optima', 'sim.getValue("optima");');
   log.addCustomColumn('N', 'p1.individualCount;');
-  log.addMeanSDColumns('nmutT', 'sim.subpopulations.individuals.countOfMutationsOfType(m1);');
-  log.addMeanSDColumns('nmutN', 'sim.subpopulations.individuals.countOfMutationsOfType(m2);');
-  log.addMeanSDColumns('nmutD', 'sim.subpopulations.individuals.countOfMutationsOfType(m3);');
-  log.addCustomColumn('sshT', 'ssh(p1, m1);');
-  log.addCustomColumn('sshN', 'ssh(p1, m2);');
-  log.addCustomColumn('sshD', 'ssh(p1, m3);');
-  log.addCustomColumn('nfixed_dels', '2*sum(sim.substitutions.mutationType == m3);');
-  log.addCustomColumn('fixed_load', '(1-s)^(2*sum(sim.substitutions.mutationType == m3));');
-  log.addCustomColumn('fixed_trait', '2*sum(sim.substitutions.selectionCoeff*asInteger(sim.substitutions.mutationType == m1));');
   log.addCustomColumn('Ne', 'sim.getValue("Ne");');
   log.addMeanSDColumns('repr', 'sim.subpopulations.individuals.reproductiveOutput;');
+  log.addMeanSDColumns('nmutN', 'sim.subpopulations.individuals.countOfMutationsOfType(m1);');
+  log.addCustomColumn('sshN', 'ssh(p1, m1);');
+
+  if (trait) {
+    log.addMeanSDColumns('z', 'sim.subpopulations.individuals.tagF;');
+    log.addMeanSDColumns('nmutT', 'sim.subpopulations.individuals.countOfMutationsOfType(m2);');
+    log.addCustomColumn('sshT', 'ssh(p1, m2);');
+    log.addCustomColumn('fixed_trait', '2*sum(sim.substitutions.selectionCoeff*asInteger(sim.substitutions.mutationType == m2));');
+    log.addCustomColumn('optima', 'sim.getValue("optima");');
+  } else {
+    log.addMeanSDColumns('z', 'NAN;');
+    log.addMeanSDColumns('nmutT', 'NAN;');
+    log.addCustomColumn('sshT', 'NAN;');
+    log.addCustomColumn('fixed_trait', 'NAN;');
+    log.addCustomColumn('optima', 'NAN;');
+  }
+  
+  if (del) {
+    log.addMeanSDColumns('nmutD', 'sim.subpopulations.individuals.countOfMutationsOfType(m3);');
+    log.addCustomColumn('sshD', 'ssh(p1, m3);');
+    log.addCustomColumn('nfixed_dels', '2*sum(sim.substitutions.mutationType == m3);');
+    log.addCustomColumn('fixed_load', '(1-s)^(2*sum(sim.substitutions.mutationType == m3));');
+  } else {
+    log.addMeanSDColumns('nmutD', 'NAN;');
+    log.addCustomColumn('sshD', 'NAN;');
+    log.addCustomColumn('nfixed_dels', 'NAN;');
+    log.addCustomColumn('fixed_load', 'NAN;');
+  }
 }
 
 s1 early() {
   //print(sim.generation);
   inds = sim.subpopulations.individuals;
-  if (sim.generation > shift_generation) {
-    // remember individuals before the optima shift
-    if (fitfunc == 'moving') {
-      // optima evolution as BM
-      optima0 = sim.getValue('optima');
-      if (optimabm) {
-        shift = rnorm(1, 0, optimasd*sqrt(Vs));
-      } else {
-        shift = optimasd*sqrt(Vs);
+  if (trait) {
+    // handle the optimum shift or moving optimum
+    if (sim.generation > shift_generation) {
+      if (fitfunc == 'moving') {
+        // optima evolution as BM
+        optima0 = sim.getValue('optima');
+        if (optimabm) {
+          shift = rnorm(1, 0, optimasd*sqrt(Vs));
+        } else {
+          shift = optimasd*sqrt(Vs);
+        }
+        optima = optima0 + shift;
+        sim.setValue('optima', optima);
+      } else if (fitfunc == 'shift') {
+        optima0 = sim.getValue('optima');
+        optima = optimasd * sqrt(Vs);
+        sim.setValue('optima', optima);
       }
-      optima = optima0 + shift;
-      sim.setValue('optima', optima);
-    } else if (fitfunc == 'shift') {
-      optima0 = sim.getValue('optima');
-      optima = optimasd * sqrt(Vs);
-      sim.setValue('optima', optima);
     }
-  }
-
+  } 
 
   // deleterious mutation fitness effects  
   // we need to factor in the fixed load, since mutations
   // are converted to substitutions
-  ndelsubs = 2*sum(sim.substitutions.mutationType == m3); // 2x for diploidy  
-  fixed_load = (1-s)^ndelsubs;
-  if (synergistic) {
-    ndel = inds.countOfMutationsOfType(m3);
-    del_fitness = exp(-(a * ndel + 0.5 * b * ndel^2));
+  if (del) {
+    ndelsubs = 2*sum(sim.substitutions.mutationType == m3); // 2x for diploidy  
+    fixed_load = (1-s)^ndelsubs;
+    if (synergistic) {
+      // synergistic selection ignores h!)
+      ndel = inds.countOfMutationsOfType(m3);
+      del_fitness = exp(-(a * ndel + 0.5 * b * ndel^2));
+    } else {
+      // multiplicative selection
+      del_fitness = sapply(inds, 'standard_fitness(applyValue, m3, s, h);');
+    }
+    del_and_fixed_load_fitness = del_fitness * fixed_load;
   } else {
-    del_fitness = sapply(inds, 'standard_fitness(applyValue, m3, s, h);');
+    // no deleterious mutation fitness
+    del_and_fixed_load_fitness = 1; 
   }
-  
-  phenotypes = inds.sumOfMutationsOfType(m1);
-  // fixed trait effects
-  fixed_trait = 2 * sum(sim.substitutions.selectionCoeff * asInteger(sim.substitutions.mutationType == m1));
-  inds.tagF = phenotypes;
+ 
+  if (trait) {
+    phenotypes = inds.sumOfMutationsOfType(m2);
+    // fixed trait effects
+    fixed_trait = 2 * sum(sim.substitutions.selectionCoeff * asInteger(sim.substitutions.mutationType == m2));
+    inds.tagF = phenotypes;
 
-  // a faster way to calculate fitness
-  optima = sim.getValue('optima');
+    // a faster way to calculate fitness
+    optima = sim.getValue('optima');
+    trait_fitness = dnorm(phenotypes+fixed_trait-optima, mean=0.0, sd=sqrt(Vs));
+  } else { 
+    // no trait 
+    trait_fitness = 1;
+  }
 
-
-  inds.fitnessScaling = dnorm(phenotypes + fixed_trait - optima, mean=0.0, sd=sqrt(Vs)) * del_fitness * fixed_load;
+  inds.fitnessScaling = trait_fitness * del_and_fixed_load_fitness;
   catn(sim.generation + ": del_fitness = " + mean(del_fitness) + ", #del subs = " + ndelsubs + ", fixed load = " + fixed_load + ", N = " + p1.individualCount);
 
   // mutation tracking for Ne on-the-fly calculation
@@ -210,7 +301,7 @@ s1 early() {
   } else {
     sim.setValue("Ne", 0);
   }
-  muts = sim.mutationsOfType(m2);
+  muts = sim.mutationsOfType(m1);
   if (length(muts) > 1000) {
     muts = sample(muts, 1000);
   }
